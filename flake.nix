@@ -29,10 +29,10 @@
               GOPROXY = "direct";
             };
             
-            # Build as a plugin
+            # Build as a plugin, ignoring vendor directory
             buildPhase = ''
               runHook preBuild
-              go build -buildmode=plugin -o flow-latest-ledger.so .
+              go build -mod=mod -buildmode=plugin -o flow-latest-ledger.so .
               runHook postBuild
             '';
 
