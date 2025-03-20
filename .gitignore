@@ -23,3 +23,14 @@ go.work.sum
 
 # env file
 .env
+
+# Nix
+result
+result/
+.direnv/
+
+# Editor and IDE files
+.idea/
+.vscode/
+*.swp
+*.swo

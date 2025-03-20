@@ -1,5 +1,5 @@
 {
-  description = "Obsrvr Flow Plugin: Latest-Ledger Processor";
+  description = "Obsrvr Flow Plugin: Latest Ledger Processor";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -18,25 +18,25 @@
             version = "1.0.0";
             src = ./.;
             
-            # Initially empty, will be updated after first build attempt
+            # Start with empty string to calculate hash on first build
             vendorHash = null;
             
-            # Build configuration
+            # Enable CGO which is required for Go plugins
+            hardeningDisable = [ "all" ];
+            
             env = {
-              # No CGO needed for this plugin
-              CGO_ENABLED = "0";
-              # Allow Go to download modules directly if needed
+              CGO_ENABLED = "1"; # This is critical for plugin mode
               GOPROXY = "direct";
             };
             
-            # Build as a plugin, ignoring vendor directory
+            # Build as a shared library/plugin
             buildPhase = ''
               runHook preBuild
-              go build -mod=mod -buildmode=plugin -o flow-latest-ledger.so .
+              go build -buildmode=plugin -o flow-latest-ledger.so .
               runHook postBuild
             '';
 
-            # Install the plugin
+            # Custom install phase for the plugin
             installPhase = ''
               runHook preInstall
               mkdir -p $out/lib
@@ -48,15 +48,29 @@
               fi
               runHook postInstall
             '';
+            
+            # Add any C dependencies if needed
+            nativeBuildInputs = [ pkgs.pkg-config ];
+            buildInputs = [
+              # If you need any C libraries, add them here
+            ];
           };
         };
 
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [ 
-            go_1_21  # Adjust to match your project's Go version
+            # Using Go 1.21 which is widely supported for plugins
+            go_1_21
+            pkg-config
             gopls
             delve
+            # Any additional development tools
           ];
+          
+          # Enable CGO in the development shell
+          env = {
+            CGO_ENABLED = "1";
+          };
         };
       }
     );
