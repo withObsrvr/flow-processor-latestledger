@@ -18,21 +18,22 @@
             version = "1.0.0";
             src = ./.;
             
-            # Start with empty string to calculate hash on first build
+            # Since we're using the vendor directory directly
             vendorHash = null;
             
             # Enable CGO which is required for Go plugins
             hardeningDisable = [ "all" ];
             
-            env = {
-              CGO_ENABLED = "1"; # This is critical for plugin mode
-              GOPROXY = "direct";
-            };
+            # Configure build environment
+            preBuild = ''
+              export CGO_ENABLED=1
+            '';
             
             # Build as a shared library/plugin
             buildPhase = ''
               runHook preBuild
-              go build -buildmode=plugin -o flow-latest-ledger.so .
+              # Use -mod=vendor to use the vendor directory
+              go build -mod=vendor -buildmode=plugin -o flow-latest-ledger.so .
               runHook postBuild
             '';
 
@@ -64,13 +65,24 @@
             pkg-config
             gopls
             delve
+            git
             # Any additional development tools
           ];
           
           # Enable CGO in the development shell
-          env = {
-            CGO_ENABLED = "1";
-          };
+          shellHook = ''
+            export CGO_ENABLED=1
+            
+            # Helper to vendor dependencies
+            if [ ! -d vendor ]; then
+              echo "Vendoring dependencies..."
+              go mod tidy
+              go mod vendor
+            fi
+            
+            echo "Development environment ready!"
+            echo "To build the plugin manually: go build -buildmode=plugin -o flow-latest-ledger.so ."
+          '';
         };
       }
     );
