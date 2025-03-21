@@ -20,15 +20,19 @@ import (
 
 // LatestLedger holds metrics extracted from a ledger.
 type LatestLedger struct {
-	Sequence          uint32    `json:"sequence"`
-	Hash              string    `json:"hash"`
-	TransactionCount  int       `json:"transaction_count"`
-	OperationCount    int       `json:"operation_count"`
-	SuccessfulTxCount int       `json:"successful_tx_count"`
-	FailedTxCount     int       `json:"failed_tx_count"`
-	TotalFeeCharged   int64     `json:"total_fee_charged"`
-	ClosedAt          time.Time `json:"closed_at"`
-	BaseFee           uint32    `json:"base_fee"`
+	Sequence                 uint32    `json:"sequence"`
+	Hash                     string    `json:"hash"`
+	TransactionCount         int       `json:"transaction_count"`
+	TxSetOperationCount      int       `json:"tx_set_operation_count"`     // All operations submitted to the ledger
+	SuccessfulOperationCount int       `json:"successful_operation_count"` // Operations from successful transactions
+	SuccessfulTxCount        int       `json:"successful_tx_count"`
+	FailedTxCount            int       `json:"failed_tx_count"`
+	TotalFeeCharged          int64     `json:"total_fee_charged"`
+	ClosedAt                 time.Time `json:"closed_at"`
+	BaseFee                  uint32    `json:"base_fee"`
+
+	// Operations per second (called transactions per second in other blockchains)
+	TransactionsPerSecond float64 `json:"transactions_per_second"`
 
 	// Soroban metrics
 	SorobanTxCount            int    `json:"soroban_tx_count"`
@@ -41,9 +45,10 @@ type LatestLedger struct {
 
 // LatestLedgerProcessor implements both pluginapi.Processor and pluginapi.ConsumerRegistry
 type LatestLedgerProcessor struct {
-	networkPassphrase string
-	consumers         []pluginapi.Consumer  // downstream consumers
-	processors        []pluginapi.Processor // downstream processors
+	networkPassphrase       string
+	consumers               []pluginapi.Consumer  // downstream consumers
+	processors              []pluginapi.Processor // downstream processors
+	previousLedgerCloseTime time.Time             // store previous ledger close time for TPS calculation
 }
 
 // GetSchemaDefinition returns GraphQL type definitions for this plugin
@@ -53,12 +58,14 @@ type LatestLedger {
     sequence: Int!
     hash: String!
     transactionCount: Int!
-    operationCount: Int!
+    txSetOperationCount: Int!
+    successfulOperationCount: Int!
     successfulTxCount: Int!
     failedTxCount: Int!
     totalFeeCharged: String!
     closedAt: String!
     baseFee: Int!
+    transactionsPerSecond: Float!
     sorobanTxCount: Int!
     totalSorobanFees: String!
     totalResourceInstructions: String!
@@ -128,17 +135,20 @@ func (p *LatestLedgerProcessor) Process(ctx context.Context, msg pluginapi.Messa
 				// Still increment transaction count even for unknown transactions
 				metrics.TransactionCount++
 				metrics.FailedTxCount++
+				metrics.UnknownTxCount++
 				continue
 			}
 			return fmt.Errorf("error reading transaction: %v", err)
 		}
 
 		metrics.TransactionCount++
-		metrics.OperationCount += len(tx.Envelope.Operations())
+		operationCount := len(tx.Envelope.Operations())
+		metrics.TxSetOperationCount += operationCount
 		metrics.TotalFeeCharged += int64(tx.Result.Result.FeeCharged)
 
 		if tx.Result.Successful() {
 			metrics.SuccessfulTxCount++
+			metrics.SuccessfulOperationCount += operationCount
 		} else {
 			metrics.FailedTxCount++
 		}
@@ -152,16 +162,38 @@ func (p *LatestLedgerProcessor) Process(ctx context.Context, msg pluginapi.Messa
 		}
 	}
 
+	// Calculate transactions per second (operations per second in Stellar terms)
+	// Using successful operations for TPS calculation as it better represents actual throughput
+	if !p.previousLedgerCloseTime.IsZero() {
+		// Calculate the time difference between the current and previous ledger
+		timeDiff := metrics.ClosedAt.Sub(p.previousLedgerCloseTime).Seconds()
+		if timeDiff > 0 {
+			metrics.TransactionsPerSecond = float64(metrics.SuccessfulOperationCount) / timeDiff
+		} else {
+			// Default fallback - Stellar's target is ~5 second ledger close time
+			metrics.TransactionsPerSecond = float64(metrics.SuccessfulOperationCount) / 5.0
+		}
+	} else {
+		// For the first ledger processed, use a reasonable approximation
+		// Stellar's historical ledger close time is ~5 seconds
+		metrics.TransactionsPerSecond = float64(metrics.SuccessfulOperationCount) / 5.0
+	}
+
+	// Update the previous close time for next calculation
+	p.previousLedgerCloseTime = metrics.ClosedAt
+
 	// Calculate success rate safely to avoid division by zero
 	var successRate float64
 	if metrics.TransactionCount > 0 {
 		successRate = (float64(metrics.SuccessfulTxCount) / float64(metrics.TransactionCount)) * 100
 	}
 
-	log.Printf("Latest ledger: %d (Transactions: %d, Operations: %d, Success Rate: %.2f%%)",
+	log.Printf("Latest ledger: %d (Txs: %d, All Ops: %d, Successful Ops: %d, TPS: %.2f, Success Rate: %.2f%%)",
 		metrics.Sequence,
 		metrics.TransactionCount,
-		metrics.OperationCount,
+		metrics.TxSetOperationCount,
+		metrics.SuccessfulOperationCount,
+		metrics.TransactionsPerSecond,
 		successRate,
 	)
 
