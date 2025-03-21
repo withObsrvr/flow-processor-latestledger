@@ -3,6 +3,8 @@
 This processor plugin analyzes Stellar ledger data and provides metrics for each closed ledger, including:
 - Basic ledger information (sequence, hash, close time)
 - Transaction counts and success rates
+- Operation counts (both total submitted and successful)
+- Transactions per second (calculated from successful operations)
 - Fee metrics
 - Soroban transaction metrics
 
@@ -74,12 +76,14 @@ type LatestLedger {
     sequence: Int!
     hash: String!
     transactionCount: Int!
-    operationCount: Int!
+    txSetOperationCount: Int!
+    successfulOperationCount: Int!
     successfulTxCount: Int!
     failedTxCount: Int!
     totalFeeCharged: String!
     closedAt: String!
     baseFee: Int!
+    transactionsPerSecond: Float!
     sorobanTxCount: Int!
     totalSorobanFees: String!
     totalResourceInstructions: String!
@@ -94,6 +98,16 @@ type LatestLedger {
 latestLedger: LatestLedger
 ledgerBySequence(sequence: Int!): LatestLedger
 ```
+
+## Understanding the Metrics
+
+This plugin tracks several important metrics:
+
+- **txSetOperationCount**: Total number of operations in all transactions submitted to the ledger (successful and failed)
+- **successfulOperationCount**: Number of operations from successful transactions only
+- **transactionsPerSecond**: The rate of successful operations per second (this is equivalent to what other blockchains call "transactions per second")
+
+In Stellar, a transaction can contain multiple operations, and each operation is an atomic unit of work (payment, account creation, etc.). What other blockchains call a "transaction" is more equivalent to a Stellar "operation" in terms of functionality, which is why our TPS metric is based on operations rather than transactions.
 
 ## Dependencies
 
