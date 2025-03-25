@@ -40,7 +40,7 @@ nix develop
 ```
 
 This will provide a shell with all the necessary dependencies, including:
-- Go 1.21
+- Go 1.24.1
 - Development tools (gopls, delve)
 
 From within the development shell, you can build the plugin manually:

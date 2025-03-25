@@ -1,6 +1,6 @@
 module github.com/withObsrvr/flow-processor-latestledger
 
-go 1.23.4
+go 1.24.1
 
 require (
 	github.com/stellar/go v0.0.0-20250311234916-385ac5aca1a4

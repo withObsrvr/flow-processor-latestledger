@@ -60,8 +60,8 @@
 
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [ 
-            # Using Go 1.21 which is widely supported for plugins
-            go_1_21
+            # Updated to Go 1.24.1
+            go_1_24
             pkg-config
             gopls
             delve
