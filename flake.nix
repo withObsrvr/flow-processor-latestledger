@@ -1,5 +1,5 @@
 {
-  description = "Obsrvr Flow Plugin: Latest Ledger Processor";
+  description = "Obsrvr Flow Plugin: Latest Ledger Processor (Dual Target)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -13,6 +13,7 @@
       in
       {
         packages = {
+          # Native Go plugin (default)
           default = pkgs.buildGoModule {
             pname = "flow-latest-ledger";
             version = "1.0.0";
@@ -29,11 +30,10 @@
               export CGO_ENABLED=1
             '';
             
-            # Build as a shared library/plugin
+            # Build as a shared library/plugin with the goplugin tag
             buildPhase = ''
               runHook preBuild
-              # Use -mod=vendor to use the vendor directory
-              go build -mod=vendor -buildmode=plugin -o flow-latest-ledger.so .
+              go build -mod=vendor -tags=goplugin -buildmode=plugin -o flow-latest-ledger.so .
               runHook postBuild
             '';
 
@@ -56,33 +56,95 @@
               # If you need any C libraries, add them here
             ];
           };
+          
+          # WebAssembly module target
+          wasm = pkgs.buildGoModule {
+            pname = "flow-latest-ledger-wasm";
+            version = "1.0.0";
+            src = ./.;
+            
+            # Since we're using the vendor directory directly
+            vendorHash = null;
+            
+            # Build as a WebAssembly module with the wasmmodule tag
+            buildPhase = ''
+              runHook preBuild
+              export GOOS=wasip1
+              export GOARCH=wasm
+              go build -mod=vendor -tags=wasmmodule -buildmode=c-shared -o flow-latest-ledger.wasm .
+              runHook postBuild
+            '';
+
+            # Custom install phase for the WebAssembly module
+            installPhase = ''
+              runHook preInstall
+              mkdir -p $out/lib
+              cp flow-latest-ledger.wasm $out/lib/
+              mkdir -p $out/share
+              cp go.mod $out/share/
+              if [ -f go.sum ]; then
+                cp go.sum $out/share/
+              fi
+              runHook postInstall
+            '';
+          };
         };
 
-        devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [ 
-            # Updated to Go 1.24.1
-            go_1_24
-            pkg-config
-            gopls
-            delve
-            git
-            # Any additional development tools
-          ];
+        devShells = {
+          # Development shell for the Go plugin (default)
+          default = pkgs.mkShell {
+            buildInputs = with pkgs; [ 
+              # Updated to Go 1.24.1
+              go_1_24
+              pkg-config
+              gopls
+              delve
+              git
+              # Any additional development tools
+            ];
+            
+            # Enable CGO in the development shell
+            shellHook = ''
+              export CGO_ENABLED=1
+              
+              # Helper to vendor dependencies
+              if [ ! -d vendor ]; then
+                echo "Vendoring dependencies..."
+                go mod tidy
+                go mod vendor
+              fi
+              
+              echo "Development environment ready!"
+              echo "To build the Go plugin: go build -tags=goplugin -buildmode=plugin -o flow-latest-ledger.so ."
+              echo "To build the WASM module: GOOS=wasip1 GOARCH=wasm go build -tags=wasmmodule -buildmode=c-shared -o flow-latest-ledger.wasm ."
+            '';
+          };
           
-          # Enable CGO in the development shell
-          shellHook = ''
-            export CGO_ENABLED=1
+          # Development shell specifically for WebAssembly development
+          wasm = pkgs.mkShell {
+            buildInputs = with pkgs; [ 
+              # Updated to Go 1.24.1
+              go_1_24
+              gopls
+              delve
+              git
+              # Tools for working with WASM
+              wasmtime
+            ];
             
-            # Helper to vendor dependencies
-            if [ ! -d vendor ]; then
-              echo "Vendoring dependencies..."
-              go mod tidy
-              go mod vendor
-            fi
-            
-            echo "Development environment ready!"
-            echo "To build the plugin manually: go build -buildmode=plugin -o flow-latest-ledger.so ."
-          '';
+            # Set up the WASM development environment
+            shellHook = ''
+              # Helper to vendor dependencies
+              if [ ! -d vendor ]; then
+                echo "Vendoring dependencies..."
+                go mod tidy
+                go mod vendor
+              fi
+              
+              echo "WebAssembly development environment ready!"
+              echo "To build the WASM module: GOOS=wasip1 GOARCH=wasm go build -tags=wasmmodule -buildmode=c-shared -o flow-latest-ledger.wasm ."
+            '';
+          };
         };
       }
     );

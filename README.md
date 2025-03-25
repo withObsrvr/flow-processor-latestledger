@@ -1,4 +1,4 @@
-# Latest Ledger Processor Plugin for Obsrvr Flow
+# Latest Ledger Processor for Obsrvr Flow (Dual-Target)
 
 This processor plugin analyzes Stellar ledger data and provides metrics for each closed ledger, including:
 - Basic ledger information (sequence, hash, close time)
@@ -8,49 +8,73 @@ This processor plugin analyzes Stellar ledger data and provides metrics for each
 - Fee metrics
 - Soroban transaction metrics
 
+## Dual-Target Architecture
+
+This project supports building two different types of modules from the same codebase:
+
+1. **Go Plugin** (.so) - For direct integration with the Flow application using Go's native plugin system
+2. **WebAssembly Module** (.wasm) - For sandboxed execution using the WebAssembly System Interface (WASI)
+
+The architecture is designed with:
+- Shared core business logic in the `core` package
+- Target-specific interfaces in the `plugin` and `wasm` packages
+- Build-time selection using Go build tags
+
 ## Building with Nix
 
-This project uses Nix for reproducible builds.
+This project uses Nix for reproducible builds of both targets.
 
 ### Prerequisites
 
 - [Nix package manager](https://nixos.org/download.html) with flakes enabled
 
-### Building
+### Building the Go Plugin (Default)
 
-1. Clone the repository:
 ```bash
 git clone <repository-url>
 cd flow-processor-latestledger
-```
-
-2. Build with Nix:
-```bash
 nix build
 ```
 
 The built plugin will be available at `./result/lib/flow-latest-ledger.so`.
 
-### Development
+### Building the WebAssembly Module
 
-To enter a development shell with all dependencies:
+```bash
+nix build .#wasm
+```
+
+The built WebAssembly module will be available at `./result/lib/flow-latest-ledger.wasm`.
+
+## Development Environments
+
+### Default Go Plugin Development
 
 ```bash
 nix develop
 ```
 
-This will provide a shell with all the necessary dependencies, including:
+This provides a shell with:
 - Go 1.24.1
-- Development tools (gopls, delve)
+- All development tools
+- CGO enabled for plugin development
 
-From within the development shell, you can build the plugin manually:
+### WebAssembly Development
+
 ```bash
-go build -buildmode=plugin -o flow-latest-ledger.so .
+nix develop .#wasm
 ```
+
+This provides a shell with:
+- Go 1.24.1
+- Wasmtime for testing WebAssembly modules
+- Development tools
 
 ## Plugin Configuration
 
-When configuring this plugin, you need to provide the network passphrase in your Flow configuration:
+When configuring either module type, you need to provide the network passphrase:
+
+### Go Plugin Configuration (in Flow):
 
 ```json
 {
@@ -65,11 +89,42 @@ When configuring this plugin, you need to provide the network passphrase in your
 }
 ```
 
+### WebAssembly Module Configuration (example using Wazero):
+
+```go
+// Initialize the processor
+configJSON := `{"network_passphrase":"Public Global Stellar Network ; September 2015"}`
+initFn := wasmModule.ExportedFunction("initialize")
+initFn.Call(ctx, api.EncodeString(configJSON))
+
+// Process a ledger
+processFn := wasmModule.ExportedFunction("processLedger")
+result, _ := processFn.Call(ctx, api.EncodeString(ledgerDataJSON))
+metricsJSON := api.DecodeString(result[0])
+```
+
+## API Reference
+
+### Go Plugin API
+- Implements the `pluginapi.Plugin` interface
+- Directly integrates with the Flow plugin system
+- Communicates using Go objects
+
+### WebAssembly Exports
+The WebAssembly module exports these functions:
+
+| Function | Parameters | Returns | Description |
+|----------|------------|---------|-------------|
+| `initialize` | `configJSON: string` | `statusCode: int32` | Initializes the processor |
+| `processLedger` | `ledgerJSON: string` | `metricsJSON: string` | Processes a ledger and returns metrics |
+| `getSchemaDefinition` | none | `schema: string` | Returns GraphQL schema |
+| `getQueryDefinitions` | none | `queries: string` | Returns GraphQL queries |
+| `version` | none | `version: string` | Returns the module version |
+| `name` | none | `name: string` | Returns the module name |
+
 ## GraphQL Schema
 
-This plugin provides the following GraphQL types and queries:
-
-### Types
+Both module types provide the same GraphQL schema:
 
 ```graphql
 type LatestLedger {
@@ -92,16 +147,9 @@ type LatestLedger {
 }
 ```
 
-### Queries
-
-```graphql
-latestLedger: LatestLedger
-ledgerBySequence(sequence: Int!): LatestLedger
-```
-
 ## Understanding the Metrics
 
-This plugin tracks several important metrics:
+This processor tracks several important metrics:
 
 - **txSetOperationCount**: Total number of operations in all transactions submitted to the ledger (successful and failed)
 - **successfulOperationCount**: Number of operations from successful transactions only
@@ -109,11 +157,17 @@ This plugin tracks several important metrics:
 
 In Stellar, a transaction can contain multiple operations, and each operation is an atomic unit of work (payment, account creation, etc.). What other blockchains call a "transaction" is more equivalent to a Stellar "operation" in terms of functionality, which is why our TPS metric is based on operations rather than transactions.
 
-## Dependencies
+## Comparison of Module Types
 
-All dependencies are managed through the `flake.nix` file when using Nix, including:
-- github.com/stellar/go
-- github.com/withObsrvr/pluginapi
+| Feature | Go Plugin (.so) | WebAssembly Module (.wasm) |
+|---------|----------------|-----------------------------|
+| **Integration** | Direct memory access | Sandbox isolation |
+| **Performance** | Native speed | Near-native speed |
+| **Security** | Less isolation | Strong isolation |
+| **Portability** | Linux only | Cross-platform |
+| **Dependencies** | Needs matching Go version | Self-contained |
+| **API Style** | Native Go objects | JSON string exchange |
+| **Build Size** | 64MB+ | Smaller (20-30MB) |
 
 ## License
 
