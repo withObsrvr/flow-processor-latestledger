@@ -134,6 +134,9 @@
             
             # Set up the WASM development environment
             shellHook = ''
+              # Make sure wasmtime is in PATH
+              export PATH=${pkgs.wasmtime}/bin:$PATH
+              
               # Helper to vendor dependencies
               if [ ! -d vendor ]; then
                 echo "Vendoring dependencies..."
@@ -143,6 +146,9 @@
               
               echo "WebAssembly development environment ready!"
               echo "To build the WASM module: GOOS=wasip1 GOARCH=wasm go build -tags=wasmmodule -buildmode=c-shared -o flow-latest-ledger.wasm ."
+              
+              # Print wasmtime version to confirm it's available
+              echo "Wasmtime version: $(wasmtime --version)"
             '';
           };
         };
